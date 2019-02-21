@@ -1,0 +1,340 @@
+
+#include<avr/io.h>
+#include<util/delay.h>
+#include<avr/interrupt.h>
+static int countMAX = 0;
+static int door_status =0;
+static int autolock = 1;
+static int d0_stat = 0;
+static int d1_stat = 0;
+static int d2_stat = 0;
+static int d3_stat = 0;
+static int status = 0;
+int num2 = 0;
+int num = 0;
+
+int count =0;
+int car_key = 0;
+int main (void){
+
+DDRB |= (1<<PB0);			// dig pin 8  OUT . car light
+//DDRD |= (1<<PD7);			//dig pin 7 buzzer
+DDRD |= (1<<PD6);  			//dig pin 6 alarm
+DDRD &= ~(1<<PD2);			// dig pin 2 INP (car_key)
+DDRB = 0xC3; 				//pin8 to 11 INP (door sens)
+PORTB|=~(1<<PB0);			//MAKE LOW
+SREG |= (1<<PD7);			//global INT EN
+DDRC &= ~(1<<PC0);			//analog i/p
+DDRD |= (1<<PD3);			//buzzer
+Serial.begin(9600);
+SetClkSource2();
+
+adc_init();
+PWM_setup();
+carkey_enable();
+timer_init();
+doorINT_en();
+timer2_init();
+//DDRD |= (1<<PD6);
+  ADMUX &= ~(1<<MUX0);
+  ADMUX &= ~(1<<MUX1);
+  ADMUX &= ~(1<<MUX2);
+  ADMUX &= ~(1<<MUX0);
+PORTB &= ~(1<<PB1);			//	clear light
+  	while(1){
+    	Serial.print("car_key ");
+      	Serial.println(car_key);
+      	Serial.print("autolock ");
+
+    	Serial.println(autolock);
+      	Serial.print("door_status ");
+
+    	Serial.println(door_status);
+
+
+   	 	if(car_key && ~door_status ){
+			
+          if(autolock){
+        TCNT1H = 0x00;
+  		TCNT1L = 0x00;
+          }
+          
+  		Serial.println("a1");
+          ADMUX &= ~(1<<MUX0);
+
+          ADCSRA |= (1<<ADSC);                 //start the conversion
+    	while (ADCSRA & (1<<ADSC)){;}          //wait for end of conversion
+    	num = ADCL;
+    	num2 = ADCH;
+    	OCR1AL	= num;
+    	OCR1AH = num2;
+
+          TCCR1A = 0xC3;							//fast PWM , SET on compare
+  	
+    	Serial.println(count);
+    	Serial.println(TCNT1L);
+    	Serial.println(num);
+
+   		 ADMUX |= (1<<MUX0);				//ADC channel switch
+  		ADCSRA |= (1<<ADSC);                 //start the conversion
+
+        while (ADCSRA & (1<<ADSC)){;}          //wait for end of conversion
+    	num = ADCL;
+    	num2 = ADCH;
+          Serial.println("num");
+          if(num > 100){
+            if(door_status){
+             PORTD |= (1<<PD3);
+              Serial.println("********");
+              }
+            else {
+            	PORTD &= ~(1<<PD3);
+              Serial.println("^^^^6");
+            }
+			
+          }
+          else{
+            PORTD &= ~(1<<PD3);
+            Serial.println("%%%%%");}
+   	 	}
+    		else {
+
+          		if(door_status){
+      			PORTD|= (1<<PD6);
+    			Serial.println("a3");
+
+     		 	}
+      			Serial.println("a4");
+             PORTD &= ~(1<<PD6);
+      		}
+
+  }
+
+}
+
+void doorINT_en(){
+PCICR |=(1<<PCIE0);			//enable pin change INT
+PCMSK0 = 0x3C;				//mask INT
+}
+
+void SetClkSource()
+{
+	TCCR0B|=(1<<CS00)|(1<<CS02);//clk source set
+}
+
+void timer_init()
+{
+ 	TCCR0A&=~(1<<WGM00);
+	TCCR0A&=~(1<<WGM01);
+	TCCR0B&=~(1<<WGM02);
+	SetClkSource();
+ }
+
+void car_lock(){
+	Serial.println("###########");
+
+  if (door_status){
+    Serial.println("door open");
+
+  car_key = 1;				//car key is still enabled
+  autolock = 0;
+  PORTD |= (1<<PD6);			//alarm
+  }
+  else {
+    Serial.println("door closed");
+
+  car_key = 0;				//car key disabled
+  autolock = 1;			//enable autolock
+  PORTB &= ~(1<<PB0);	//clear all lights
+    PORTD &= ~(1<<PD3);	//clear telltail
+      
+      PORTB &= ~(1<<PB1);	//clear in light	
+    TIMSK0 &=~(1<<TOIE0);	//TO disable TIMER0
+    TIMSK2 &=~(1<<TOIE2);	//TO disable TIMER2	
+  	//DDRB |= (1<<PD6);		//alarm
+//delay(10);
+   // DDRB &=~(1<<PD6);
+    //make a beep
+  }
+}
+
+
+void carkey_enable(){
+ EICRA|=(1<<ISC00);			// pin change INT mode
+ EIMSK|=(1<<INT0);			//TO ENABLE INT0
+}
+
+
+
+void timer_start( int n){
+ 	//PORTB|=(1<<PB5);
+  countMAX = n;
+  TCNT0=0;
+  Serial.println("5");
+
+  TIMSK0|=(1<<TOIE0);	//TO ENABLE TIMER0
+
+}
+
+
+ISR(INT0_vect)
+{
+  Serial.println("int5");
+
+ //car_key = ~car_key;
+  if(car_key == 0){
+  	DDRD &= ~(1<<PD6);			//turn off alarm
+    car_key =1;
+    PORTB|=(1<<PB0);			//led on
+    if(autolock){
+    	
+     timer2_start( 255);
+    
+    
+    
+    
+    
+    }
+  	 autolock = 1;
+    timer_start(15);
+  		}
+  else if (car_key == 1){
+    
+  car_lock();
+
+  }
+  else {
+  Serial.println("ERROR");
+      }
+}
+
+
+ISR(TIMER0_OVF_vect)
+{
+
+ 	count ++;
+  	Serial.println(count);
+  	if(count>countMAX){
+  	PORTB&=~(1<<PB0);	//TOGGLE LED
+      TIMSK0&=~(1<<TOIE0);	//TO Disable TIMER0
+    count = 0;
+  }
+
+
+}
+
+ISR(PCINT0_vect)
+{
+  if(car_key == 1){
+	 TIMSK0&=~(1<<TOIE0);	//TO disable TIMER0
+    TIMSK2 &=~(1<<TOIE2);	//TO disable TIMER2	
+  autolock = 0;
+  if((PINB& (1<<PB2)) & (~d0_stat) ){
+  	PORTB|=(1<<PB0);			//led on
+  	timer_start(20);
+
+  }
+
+  else if((PINB& (1<<PB3)) & (~d1_stat) ){
+  	PORTB|=(1<<PB0);			//led on
+  	timer_start(20);
+
+  }
+
+  else if((PINB& (1<<PB4)) & (~d2_stat) ){
+  	PORTB|=(1<<PB0);			//led on
+  	timer_start(20);
+
+  }
+
+  else if((PINB& (1<<PB5)) & (~d3_stat) ){
+  	PORTB|=(1<<PB0);			//led on
+  	timer_start(20);
+    //car_lock();
+  }
+  else {
+  	PORTB&=~(1<<PB0);			//led OFF
+  Serial.println("333");
+  }
+  }
+  d0_stat = PINB& (1<<PB2);
+  d1_stat = PINB& (1<<PB3);
+  d2_stat = PINB& (1<<PB4);
+  d3_stat = PINB& (1<<PB5);
+  Serial.println("statt");
+
+  Serial.println(d0_stat);
+  Serial.println(d1_stat);
+  Serial.println(d2_stat);
+  Serial.println(d3_stat);
+
+  door_status = d0_stat||d1_stat||d2_stat||d3_stat;
+
+
+}
+ void SetClkSource2()
+{
+	TCCR1B|=(1<<CS11)|(1<<CS10);//clk source set
+}
+
+void adc_init()
+{
+  	DIDR0 |= (1<<ADC0D);		//diable digital input
+  	DIDR0 |= (1<<ADC1D);
+  	DIDR0 |= (1<<ADC2D);
+
+    ADMUX |= (1<<REFS0);     	//select AVCC as reference
+    ADCSRA |= (1<<ADEN) ;  		//enable and prescale
+	ADCSRA |= (1<<ADPS0);
+ 	ADCSRA |= (1<<ADPS1);
+ 	ADCSRA |= (1<<ADPS2);
+
+
+}
+
+
+void SetClkSource3()
+{
+	TCCR2B|=(1<<CS22)|(1<<CS21)|(1<<CS20);//clk source set
+}
+
+void timer2_init()
+{
+  TCCR2A = 0x00;
+
+	SetClkSource3();
+ }
+
+void timer2_start( int n){
+ 	//PORTB|=(1<<PB5);
+  countMAX = n;
+  TCNT2=0;
+  Serial.println("5");
+
+  TIMSK2|=(1<<TOIE2);	//TO ENABLE TIMER0
+
+}
+
+
+void PWM_setup(){
+
+ 	TCCR1B &= ~(1<<WGM13);
+  	TCCR1B &= ~(1<<WGM12);
+ 											//1023/2
+
+  }
+
+ISR(TIMER2_OVF_vect)
+{
+
+ 	count ++;
+  	Serial.println(count);
+  	if(count>countMAX){
+  	count = 0;
+      car_lock();
+    
+    }
+}
+
+
+
